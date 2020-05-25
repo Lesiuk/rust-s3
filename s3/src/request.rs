@@ -197,7 +197,7 @@ impl<'a> Request<'a> {
             .iter()
             .map(|(k, v)| Ok((k.parse::<HeaderName>()?, v.parse::<HeaderValue>()?)))
             .collect::<Result<HeaderMap, S3Error>>()?;
-        
+
         headers.insert(header::HOST, self.bucket.self_host().parse()?);
 
         if cfg!(feature = "path-style") {
@@ -287,7 +287,20 @@ impl<'a> Request<'a> {
             .headers(headers.to_owned())
             .body(content.to_owned());
 
-        Ok(request.send().await?)
+        let response = request.send().await?;
+
+        if cfg!(feature = "fail-on-err") && response.status().as_u16() >= 400 {
+            return Err(S3Error::from(
+                format!(
+                    "Request failed with code {}\n{}",
+                    response.status(),
+                    response.text().await?
+                )
+                    .as_str(),
+            ));
+        }
+
+        Ok(response)
     }
 
     pub async fn response_data_future(&self) -> Result<(Vec<u8>, u16)> {
@@ -296,18 +309,6 @@ impl<'a> Request<'a> {
         let body = response.bytes().await?;
         let mut body_vec = Vec::new();
         body_vec.extend_from_slice(&body[..]);
-        if cfg!(feature = "fail-on-err") {
-            if status_code >= 400 {
-                return Err(S3Error::from(
-                    format!(
-                        "Request failed with code {}\n{}",
-                        status_code,
-                        std::str::from_utf8(body_vec.as_slice())?
-                    )
-                    .as_str(),
-                ));
-            }
-        }
         Ok((body_vec, status_code))
     }
 
