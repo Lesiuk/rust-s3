@@ -12,6 +12,7 @@ use awscreds::Credentials;
 use awsregion::Region;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::stream::StreamExt;
 
 /// # Example
 /// ```
@@ -183,7 +184,7 @@ impl Bucket {
         Ok(request.response_data_to_writer_future(writer).await?)
     }
 
-        /// Stream file from S3 path to a local file, generic over T: Write, async.
+    /// Stream file from S3 path to a local file, generic over T: Write, async.
     ///
     /// # Example:
     ///
@@ -215,7 +216,17 @@ impl Bucket {
     ) -> Result<u16> {
         let command = Command::GetObject;
         let request = Request::new(self, path.as_ref(), command);
-        Ok(request.tokio_response_data_to_writer_future(writer).await?)
+
+        let response = request.response_future().await?;
+
+        let status_code = response.status();
+        let mut stream = response.bytes_stream();
+
+        while let Some(item) = stream.next().await {
+            writer.write(&item?).await?;
+        }
+
+        Ok(status_code.as_u16())
     }
 
     /// Stream file from local path to s3, async.
